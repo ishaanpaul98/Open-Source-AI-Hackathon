@@ -176,6 +176,7 @@ def review_and_decide(state: AgentState) -> AgentState:
             "should_retry": False
         }
         new_state['messages'] = new_state['messages'] + ["Error: Invalid or missing analysis"]
+        new_state['next_node'] = 'end'
         return new_state
     
     prompt = f"""
@@ -232,11 +233,12 @@ def review_and_decide(state: AgentState) -> AgentState:
             f"Overall feedback: {review['overall_feedback']}"
         ]
         
-        # Add next_node to state
-        if review['alignment_score'] > 90 or new_state['iteration'] >= 2:
-            new_state['next_node'] = 'end'
-        else:
+        # Decide next node based on review and iteration count
+        if review['alignment_score'] <= 90 and new_state['iteration'] < 2:
+            print(f"Alignment score is {review['alignment_score']}, retrying analysis")
             new_state['next_node'] = 'analyze'
+        else:
+            new_state['next_node'] = 'end'
             
         return new_state
         
