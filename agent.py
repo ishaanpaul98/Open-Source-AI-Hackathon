@@ -22,10 +22,12 @@ tracer_provider = register(
 )
 tracer = tracer_provider.get_tracer(__name__)
 
+#Creating a class for the items in the grocery list
 class Item:
-    def __init__(self, name: str, quantity: int):
+    def __init__(self, name: str, quantity: int, days_to_expire: int):
         self.name = name
         self.quantity = quantity
+        self.days_to_expire = days_to_expire
     
     def increase_quantity(self, amount: int):
         self.quantity += amount
@@ -34,4 +36,38 @@ class Item:
     def decrease_quantity(self, amount: int):
         self.quantity -= amount
         return self.quantity
+    
+    def update_days_to_expire(self, days: int):
+        self.days_to_expire = days
+        return self.days_to_expire
+    
+    def get_item_info(self):
+        return f"Item: {self.name}, Quantity: {self.quantity}, Days to Expire: {self.days_to_expire}"
 
+#Creating a class for the grocery list
+class GroceryList:
+    def __init__(self):
+        self.items = []
+    
+    def add_item(self, item: Item):
+        self.items.append(item)
+
+    def remove_item(self, item: Item):
+        self.items.remove(item)
+
+    def get_grocery_list(self):
+        return self.items
+
+    def get_item_count(self):
+        return len(self.items)
+    
+    def get_item_by_name(self, name: str):
+        for item in self.items:
+            if item.name == name:
+                return item 
+        return None
+    
+    def get_items_by_days_to_expire(self, days: int):
+        return [item for item in self.items if item.days_to_expire <= days]
+    
+    
