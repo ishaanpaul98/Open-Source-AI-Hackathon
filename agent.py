@@ -69,15 +69,23 @@ def analyze_brief_tool(state: AgentState) -> AgentState:
     """
     A tool node that analyzes a project brief and breaks down required items into categories.
     """
-    # Increment iteration count
-    state['iteration'] += 1
+    # Create a new state dictionary with default values
+    new_state = {
+        'messages': state.get('messages', []),
+        'brief': state.get('brief', ''),
+        'budget': state.get('budget', 0),
+        'priority': state.get('priority', 'balanced'),
+        'analysis': {},
+        'rethink': {},
+        'iteration': state.get('iteration', 0) + 1
+    }
     
     prompt = f"""
     You are a helpful assistant that analyzes project briefs and breaks down required items into categories.
     Analyze this project brief and break down the required items into categories.
-    Consider the priority ({state['priority']}) and budget (${state['budget']}).
+    Consider the priority ({new_state['priority']}) and budget (${new_state['budget']}).
     
-    Brief: {state['brief']}
+    Brief: {new_state['brief']}
     
     Return ONLY a valid JSON object in this exact format, with no additional text:
     {{
@@ -124,36 +132,62 @@ def analyze_brief_tool(state: AgentState) -> AgentState:
             raise ValueError("Missing 'budget_status' in analysis")
         
         # Update state with analysis
-        state['analysis'] = analysis
-        state['messages'].append(f"Brief analyzed. Total estimated cost: ${analysis['total_estimated_cost']}")
-        state['messages'].append(f"Budget status: {analysis['budget_status']}")
+        new_state['analysis'] = analysis
+        new_state['messages'] = new_state['messages'] + [
+            f"Brief analyzed. Total estimated cost: ${analysis['total_estimated_cost']}",
+            f"Budget status: {analysis['budget_status']}"
+        ]
         
-        return state
+        return new_state
         
     except Exception as e:
-        state['analysis'] = {
-            "error": str(e),
+        error_msg = str(e)
+        new_state['analysis'] = {
+            "error": error_msg,
             "categories": [],
             "total_estimated_cost": 0,
             "budget_status": "error"
         }
-        state['messages'].append(f"Error analyzing brief: {str(e)}")
-        return state
+        new_state['messages'] = new_state['messages'] + [f"Error analyzing brief: {error_msg}"]
+        return new_state
 
-def rethink_analysis(state: AgentState) -> AgentState:
+def review_and_decide(state: AgentState) -> AgentState:
     """
-    A tool node that rethinks the analysis to ensure it aligns with priorities and brief.
+    A tool node that reviews the analysis and decides whether to retry or end.
     """
+    # Create a new state dictionary with default values
+    new_state = {
+        'messages': state.get('messages', []),
+        'brief': state.get('brief', ''),
+        'budget': state.get('budget', 0),
+        'priority': state.get('priority', 'balanced'),
+        'analysis': state.get('analysis', {}),
+        'rethink': {},
+        'iteration': state.get('iteration', 0)
+    }
+    
+    # Check if analysis exists and is valid
+    if not isinstance(new_state['analysis'], dict) or 'error' in new_state['analysis']:
+        new_state['rethink'] = {
+            "error": "Invalid or missing analysis",
+            "alignment_score": 0,
+            "recommendations": [],
+            "overall_feedback": "Error during review",
+            "should_retry": False
+        }
+        new_state['messages'] = new_state['messages'] + ["Error: Invalid or missing analysis"]
+        return new_state
+    
     prompt = f"""
     You are a helpful assistant that reviews project analyses to ensure they align with priorities and requirements.
     
     Review this analysis for the following project:
-    Brief: {state['brief']}
-    Priority: {state['priority']}
-    Budget: ${state['budget']}
+    Brief: {new_state['brief']}
+    Priority: {new_state['priority']}
+    Budget: ${new_state['budget']}
     
     Current Analysis:
-    {state['analysis']}
+    {new_state['analysis']}
     
     Consider:
     1. Does the budget allocation match the priority? (e.g., if priority is 'performance', are high-performance components prioritized?)
@@ -171,7 +205,8 @@ def rethink_analysis(state: AgentState) -> AgentState:
                 "impact": "expected impact of the change"
             }}
         ],
-        "overall_feedback": "brief summary of how well the analysis aligns with priorities"
+        "overall_feedback": "brief summary of how well the analysis aligns with priorities",
+        "should_retry": boolean
     }}
     """
     
@@ -188,33 +223,35 @@ def rethink_analysis(state: AgentState) -> AgentState:
         
         # Parse the response
         import json
-        rethink = json.loads(response_text)
+        review = json.loads(response_text)
         
-        # Update state with rethink results
-        state['rethink'] = rethink
-        state['messages'].append(f"Analysis reviewed. Alignment score: {rethink['alignment_score']}/100")
-        state['messages'].append(f"Overall feedback: {rethink['overall_feedback']}")
+        # Update state with review results
+        new_state['rethink'] = review
+        new_state['messages'] = new_state['messages'] + [
+            f"Analysis reviewed. Alignment score: {review['alignment_score']}/100",
+            f"Overall feedback: {review['overall_feedback']}"
+        ]
         
-        return state
+        # Add next_node to state
+        if review['alignment_score'] > 90 or new_state['iteration'] >= 2:
+            new_state['next_node'] = 'end'
+        else:
+            new_state['next_node'] = 'analyze'
+            
+        return new_state
         
     except Exception as e:
-        state['rethink'] = {
-            "error": str(e),
+        error_msg = str(e)
+        new_state['rethink'] = {
+            "error": error_msg,
             "alignment_score": 0,
             "recommendations": [],
-            "overall_feedback": "Error during review"
+            "overall_feedback": "Error during review",
+            "should_retry": False
         }
-        state['messages'].append(f"Error during review: {str(e)}")
-        return state
-
-def should_retry_analysis(state: AgentState) -> str:
-    """
-    Determines if the analysis should be retried based on alignment score and iteration count.
-    Returns the next node to execute.
-    """
-    if state['rethink']['alignment_score'] > 90 or state['iteration'] >= 2:
-        return "end"
-    return "analyze"
+        new_state['messages'] = new_state['messages'] + [f"Error during review: {error_msg}"]
+        new_state['next_node'] = 'end'
+        return new_state
 
 class Agent:
     def __init__(self, brief: str, budget: int, priority: str = "balanced"):
@@ -233,16 +270,14 @@ class Agent:
         
         # Add nodes
         self.workflow.add_node("analyze", analyze_brief_tool)
-        self.workflow.add_node("rethink", rethink_analysis)
+        self.workflow.add_node("review", review_and_decide)
         self.workflow.add_node("end", lambda x: x)  # End node
         
         # Add edges
-        self.workflow.add_edge("analyze", "rethink")
-        
-        # Add conditional edges for rethink
+        self.workflow.add_edge("analyze", "review")
         self.workflow.add_conditional_edges(
-            "rethink",
-            should_retry_analysis,
+            "review",
+            lambda x: x.get('next_node', 'end'),
             {
                 "analyze": "analyze",
                 "end": "end"
@@ -257,52 +292,6 @@ class Agent:
         
         # Compile
         self.app = self.workflow.compile()
-
-    def print_graph_structure(self):
-        """Print the structure of the workflow graph."""
-        # Create a networkx graph
-        G = nx.DiGraph()
-        
-        # Add nodes
-        for node_name in self.workflow.nodes:
-            G.add_node(node_name)
-        
-        # Add edges
-        for edge in self.workflow.edges:
-            if len(edge) == 2:
-                G.add_edge(edge[0], edge[1])
-        
-        # Set the style
-        sns.set_style("whitegrid")
-        plt.figure(figsize=(10, 6))
-        
-        # Create positions dynamically
-        nodes = list(G.nodes())
-        pos = {}
-        for i, node in enumerate(nodes):
-            pos[node] = (i, 0)
-        
-        # Draw the graph
-        nx.draw(G, pos, with_labels=True, node_color='lightblue', 
-                node_size=2000, font_size=10, font_weight='bold',
-                arrows=True, arrowsize=20)
-        
-        # Add edge labels dynamically
-        edge_labels = {}
-        for edge in G.edges():
-            if edge[0] == '__start__':
-                edge_labels[edge] = 'start'
-            elif edge[0] == 'rethink' and edge[1] == 'analyze':
-                edge_labels[edge] = 'retry'
-            elif edge[0] == 'rethink' and edge[1] == 'end':
-                edge_labels[edge] = 'end'
-            else:
-                edge_labels[edge] = edge[0]
-        
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
-        
-        # Show the plot
-        plt.show()
 
     def add_message(self, message: str):
         """Add a message to the agent's message history."""
@@ -323,67 +312,6 @@ class Agent:
     def get_priority(self) -> str:
         """Get the project priority."""
         return self.state.priority
-        
-    def update_budget(self, amount: int):
-        """Update the budget by adding or subtracting an amount."""
-        if amount < 0:
-            self.state.decrease_budget(abs(amount))
-        else:
-            self.state.increase_budget(amount)
-            
-    def set_priority(self, priority: str):
-        """Update the project priority."""
-        if priority not in ["balanced", "performance", "aesthetic"]:
-            raise ValueError("Priority must be 'balanced', 'performance', or 'aesthetic'")
-        self.state.priority = priority
-
-    def analyze_brief(self) -> dict:
-        """
-        Run the analysis workflow and return the results.
-        """
-        # Prepare initial state
-        initial_state = AgentState(
-            messages=self.messages,
-            brief=self.state.brief,
-            budget=self.state.budget,
-            priority=self.state.priority,
-            analysis={},
-            rethink={},
-            iteration=0
-        )
-        
-        # Run the workflow
-        try:
-            print("Starting analysis workflow...")
-            final_state = self.app.invoke(initial_state)
-            
-            if final_state is None:
-                print("Warning: Graph execution returned None")
-                # Try to get more information about the state
-                try:
-                    print(f"Current state: {initial_state}")
-                    print(f"Graph nodes: {self.workflow.nodes}")
-                    print(f"Graph edges: {self.workflow.edges}")
-                except Exception as e:
-                    print(f"Error getting graph info: {str(e)}")
-                raise ValueError("Graph execution failed - final state is None")
-                
-            # Update agent state
-            self.messages = final_state.get('messages', [])
-            
-            return {
-                'analysis': final_state.get('analysis', {}),
-                'rethink': final_state.get('rethink', {}),
-                'iterations': final_state.get('iteration', 0)
-            }
-        except Exception as e:
-            print(f"Error during analysis: {str(e)}")
-            self.messages.append(f"Error during analysis: {str(e)}")
-            return {
-                'analysis': {'error': str(e)},
-                'rethink': {'error': str(e)},
-                'iterations': 0
-            }
 
 if __name__ == "__main__":
     # Create a new agent with your project details
@@ -393,50 +321,110 @@ if __name__ == "__main__":
         priority="performance"
     )
     
-    # Print the graph structure
-    agent.print_graph_structure()
-    
     # Add some initial messages
     agent.add_message("Starting project initialization")
     agent.add_message("Analyzing requirements")
     
-    # Analyze the brief
-    results = agent.analyze_brief()
-    analysis = results['analysis']
-    rethink = results['rethink']
-    iterations = results['iterations']
+    # Prepare initial state
+    initial_state = {
+        'messages': agent.messages,
+        'brief': agent.state.brief,
+        'budget': agent.state.budget,
+        'priority': agent.state.priority,
+        'analysis': {},
+        'rethink': {},
+        'iteration': 0
+    }
     
-    # Print the analysis
-    print("\nProject Analysis:")
-    if 'error' in analysis:
-        print(f"Error during analysis: {analysis['error']}")
-    else:
-        total_cost = analysis.get('total_estimated_cost', 'N/A')
-        budget_status = analysis.get('budget_status', 'N/A')
-        print(f"Total Estimated Cost: ${total_cost}")
-        print(f"Budget Status: {budget_status}")
-        print(f"Number of Iterations: {iterations}")
+    # Run the workflow
+    try:
+        print("Starting analysis workflow...")
         
-        print("\nCategories and Items:")
-        for category in analysis.get('categories', []):
-            print(f"\n{category.get('name', 'Unnamed Category')}:")
-            for item in category.get('items', []):
-                print(f"  - {item.get('name', 'Unnamed Item')} (${item.get('estimated_cost', 'N/A')})")
-                print(f"    Priority: {item.get('priority', 'N/A')}")
-                print(f"    Notes: {item.get('notes', 'N/A')}")
-    
-    # Print the rethink results
-    print("\nAnalysis Review:")
-    if 'error' in rethink:
-        print(f"Error during review: {rethink['error']}")
-    else:
-        print(f"Alignment Score: {rethink.get('alignment_score', 'N/A')}/100")
-        print(f"Overall Feedback: {rethink.get('overall_feedback', 'N/A')}")
+        # Ensure initial_state is a dictionary
+        if not isinstance(initial_state, dict):
+            raise ValueError("Initial state must be a dictionary")
         
-        if rethink.get('recommendations'):
-            print("\nRecommendations:")
-            for rec in rethink['recommendations']:
-                print(f"\nCategory: {rec.get('category', 'N/A')}")
-                print(f"Item: {rec.get('item', 'N/A')}")
-                print(f"Suggestion: {rec.get('suggestion', 'N/A')}")
-                print(f"Expected Impact: {rec.get('impact', 'N/A')}")
+        # Run the workflow with proper state handling
+        def run_workflow(state):
+            try:
+                # Ensure state is a dictionary before passing to graph
+                if not isinstance(state, dict):
+                    state = {}
+                
+                # Run the workflow and get the result
+                result = agent.app.invoke(state)
+                
+                # Ensure the result is a dictionary
+                if not isinstance(result, dict):
+                    print(f"Warning: Workflow returned non-dictionary result: {type(result)}")
+                    return {
+                        'messages': state.get('messages', []),
+                        'brief': state.get('brief', ''),
+                        'budget': state.get('budget', 0),
+                        'priority': state.get('priority', 'balanced'),
+                        'analysis': {},
+                        'rethink': {},
+                        'iteration': state.get('iteration', 0)
+                    }
+                
+                return result
+            except Exception as e:
+                print(f"Error in workflow execution: {str(e)}")
+                return {
+                    'messages': state.get('messages', []) + [f"Error in workflow execution: {str(e)}"],
+                    'brief': state.get('brief', ''),
+                    'budget': state.get('budget', 0),
+                    'priority': state.get('priority', 'balanced'),
+                    'analysis': {'error': str(e)},
+                    'rethink': {'error': str(e)},
+                    'iteration': state.get('iteration', 0)
+                }
+        
+        final_state = run_workflow(initial_state)
+        
+        # Update agent state
+        agent.messages = final_state.get('messages', [])
+        
+        # Get results
+        analysis = final_state.get('analysis', {})
+        rethink = final_state.get('rethink', {})
+        iterations = final_state.get('iteration', 0)
+        
+        # Print the analysis
+        print("\nProject Analysis:")
+        if 'error' in analysis:
+            print(f"Error during analysis: {analysis['error']}")
+        else:
+            total_cost = analysis.get('total_estimated_cost', 'N/A')
+            budget_status = analysis.get('budget_status', 'N/A')
+            print(f"Total Estimated Cost: ${total_cost}")
+            print(f"Budget Status: {budget_status}")
+            print(f"Number of Iterations: {iterations}")
+            
+            print("\nCategories and Items:")
+            for category in analysis.get('categories', []):
+                print(f"\n{category.get('name', 'Unnamed Category')}:")
+                for item in category.get('items', []):
+                    print(f"  - {item.get('name', 'Unnamed Item')} (${item.get('estimated_cost', 'N/A')})")
+                    print(f"    Priority: {item.get('priority', 'N/A')}")
+                    print(f"    Notes: {item.get('notes', 'N/A')}")
+        
+        # Print the rethink results
+        print("\nAnalysis Review:")
+        if 'error' in rethink:
+            print(f"Error during review: {rethink['error']}")
+        else:
+            print(f"Alignment Score: {rethink.get('alignment_score', 'N/A')}/100")
+            print(f"Overall Feedback: {rethink.get('overall_feedback', 'N/A')}")
+            
+            if rethink.get('recommendations'):
+                print("\nRecommendations:")
+                for rec in rethink['recommendations']:
+                    print(f"\nCategory: {rec.get('category', 'N/A')}")
+                    print(f"Item: {rec.get('item', 'N/A')}")
+                    print(f"Suggestion: {rec.get('suggestion', 'N/A')}")
+                    print(f"Expected Impact: {rec.get('impact', 'N/A')}")
+                    
+    except Exception as e:
+        print(f"Error during analysis: {str(e)}")
+        agent.messages.append(f"Error during analysis: {str(e)}")
