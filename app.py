@@ -111,7 +111,7 @@ def main():
                               help="Select your main priority for the project")
     
     # Main content area
-    if st.button("Start Analysis"):
+    if st.button("Let's Start Shopping!"):
         # Initialize agent
         st.session_state.agent = Agent(brief=brief, budget=budget, priority=priority)
         st.session_state.brief = brief
@@ -241,7 +241,8 @@ def main():
                 rethink = new_final_state.get('rethink', {})
                 
                 # Clear the container and display new results
-                analysis_container.empty()
+                
+                #analysis_container.empty()
                 with analysis_container:
                     st.header("Project Analysis")
                     
