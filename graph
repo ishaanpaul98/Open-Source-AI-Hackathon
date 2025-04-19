@@ -1,0 +1,8 @@
+digraph {
+	analyze
+	rethink
+	end
+	__start__ -> analyze
+	analyze -> rethink
+	end -> __end__
+}
