@@ -151,6 +151,85 @@ def analyze_brief_tool(state: AgentState) -> AgentState:
         new_state['messages'] = new_state['messages'] + [f"Error analyzing brief: {error_msg}"]
         return new_state
 
+def get_user_feedback(state: AgentState) -> AgentState:
+    """
+    A tool node that gets feedback from the user about the analysis.
+    """
+    # Create a new state dictionary with default values
+    new_state = {
+        'messages': state.get('messages', []),
+        'brief': state.get('brief', ''),
+        'budget': state.get('budget', 0),
+        'priority': state.get('priority', 'balanced'),
+        'analysis': state.get('analysis', {}),
+        'rethink': state.get('rethink', {}),
+        'iteration': state.get('iteration', 0),
+        'user_feedback': None
+    }
+    
+    try:
+        # Print the current analysis and review
+        print("\nCurrent Analysis:")
+        analysis = new_state['analysis']
+        if 'error' in analysis:
+            print(f"Error in analysis: {analysis['error']}")
+        else:
+            print(f"Total Estimated Cost: ${analysis.get('total_estimated_cost', 'N/A')}")
+            print(f"Budget Status: {analysis.get('budget_status', 'N/A')}")
+            
+            print("\nCategories and Items:")
+            for category in analysis.get('categories', []):
+                print(f"\n{category.get('name', 'Unnamed Category')}:")
+                for item in category.get('items', []):
+                    print(f"  - {item.get('name', 'Unnamed Item')} (${item.get('estimated_cost', 'N/A')})")
+                    print(f"    Priority: {item.get('priority', 'N/A')}")
+                    print(f"    Notes: {item.get('notes', 'N/A')}")
+        
+        print("\nReview Results:")
+        rethink = new_state['rethink']
+        if 'error' in rethink:
+            print(f"Error in review: {rethink['error']}")
+        else:
+            print(f"Alignment Score: {rethink.get('alignment_score', 'N/A')}/100")
+            print(f"Overall Feedback: {rethink.get('overall_feedback', 'N/A')}")
+            
+            if rethink.get('recommendations'):
+                print("\nRecommendations:")
+                for rec in rethink['recommendations']:
+                    print(f"\nCategory: {rec.get('category', 'N/A')}")
+                    print(f"Item: {rec.get('item', 'N/A')}")
+                    print(f"Suggestion: {rec.get('suggestion', 'N/A')}")
+                    print(f"Expected Impact: {rec.get('impact', 'N/A')}")
+        
+        # Get user feedback
+        print("\nDo you want to provide feedback for the analysis? (yes/no)")
+        response = input().strip().lower()
+        
+        if response == 'yes':
+            print("\nPlease provide your feedback:")
+            feedback = input().strip()
+            new_state['user_feedback'] = feedback
+            
+            # Update the brief with the feedback
+            new_state['brief'] = f"{new_state['brief']}\n\nUser Feedback: {feedback}"
+            
+            new_state['messages'] = new_state['messages'] + [
+                f"User feedback received: {feedback}",
+                "Brief updated with user feedback"
+            ]
+            new_state['next_node'] = 'analyze'  # Go back to analyze with updated brief
+        else:
+            new_state['messages'] = new_state['messages'] + ["No user feedback provided"]
+            new_state['next_node'] = 'end'  # End the workflow
+        
+        return new_state
+        
+    except Exception as e:
+        error_msg = str(e)
+        new_state['messages'] = new_state['messages'] + [f"Error getting user feedback: {error_msg}"]
+        new_state['next_node'] = 'end'
+        return new_state
+
 def review_and_decide(state: AgentState) -> AgentState:
     """
     A tool node that reviews the analysis and decides whether to retry or end.
@@ -163,7 +242,8 @@ def review_and_decide(state: AgentState) -> AgentState:
         'priority': state.get('priority', 'balanced'),
         'analysis': state.get('analysis', {}),
         'rethink': {},
-        'iteration': state.get('iteration', 0)
+        'iteration': state.get('iteration', 0),
+        'user_feedback': state.get('user_feedback', None)
     }
     
     # Check if analysis exists and is valid
@@ -190,10 +270,13 @@ def review_and_decide(state: AgentState) -> AgentState:
     Current Analysis:
     {new_state['analysis']}
     
+    {f"User Feedback: {new_state['user_feedback']}" if new_state['user_feedback'] else ""}
+    
     Consider:
     1. Does the budget allocation match the priority? (e.g., if priority is 'performance', are high-performance components prioritized?)
     2. Are there any items that don't align with the brief?
     3. Could the budget be better allocated to match the priorities?
+    4. {f"Address the user's feedback: {new_state['user_feedback']}" if new_state['user_feedback'] else ""}
     
     Return ONLY a valid JSON object in this exact format, with no additional text:
     {{
@@ -234,12 +317,12 @@ def review_and_decide(state: AgentState) -> AgentState:
         ]
         
         # Decide next node based on review and iteration count
-        if review['alignment_score'] <= 90 and new_state['iteration'] < 2:
+        if review['alignment_score'] <= 70 and new_state['iteration'] < 3:
             print(f"Alignment score is {review['alignment_score']}, retrying analysis")
             new_state['next_node'] = 'analyze'
         else:
-            new_state['next_node'] = 'end'
-            
+            new_state['next_node'] = 'feedback'  # Go to feedback node
+        
         return new_state
         
     except Exception as e:
@@ -273,12 +356,22 @@ class Agent:
         # Add nodes
         self.workflow.add_node("analyze", analyze_brief_tool)
         self.workflow.add_node("review", review_and_decide)
+        self.workflow.add_node("feedback", get_user_feedback)
         self.workflow.add_node("end", lambda x: x)  # End node
         
         # Add edges
         self.workflow.add_edge("analyze", "review")
         self.workflow.add_conditional_edges(
             "review",
+            lambda x: x.get('next_node', 'end'),
+            {
+                "analyze": "analyze",
+                "feedback": "feedback",
+                "end": "end"
+            }
+        )
+        self.workflow.add_conditional_edges(
+            "feedback",
             lambda x: x.get('next_node', 'end'),
             {
                 "analyze": "analyze",
@@ -318,8 +411,8 @@ class Agent:
 if __name__ == "__main__":
     # Create a new agent with your project details
     agent = Agent(
-        brief="Build a high-performance Gaming Desktop",
-        budget=1000,
+        brief="I want to create a home office. I want 2 monitors and a comfortable chair",
+        budget=1500,
         priority="performance"
     )
     
