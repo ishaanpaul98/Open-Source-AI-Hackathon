@@ -13,7 +13,20 @@ load_dotenv("secrets.env")
 # Access the variables
 api_key = os.getenv("API_KEY")
 
+if "GOOGLE_API_KEY" not in os.environ:
+    os.environ["GOOGLE_API_KEY"] = api_key
 from phoenix.otel import register
+
+#Initalizing the LLM
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-001",
+    temperature=0,
+    max_tokens=None,
+    timeout=None,
+    max_retries=2
+)
 
 # configure the Phoenix tracer
 tracer_provider = register(
