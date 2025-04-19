@@ -164,71 +164,28 @@ def get_user_feedback(state: AgentState) -> AgentState:
         'analysis': state.get('analysis', {}),
         'rethink': state.get('rethink', {}),
         'iteration': state.get('iteration', 0),
-        'user_feedback': None
+        'user_feedback': None,
+        'next_node': 'end'  # Default to end node
     }
     
-    try:
-        # Print the current analysis and review
-        print("\nCurrent Analysis:")
-        analysis = new_state['analysis']
-        if 'error' in analysis:
-            print(f"Error in analysis: {analysis['error']}")
-        else:
-            print(f"Total Estimated Cost: ${analysis.get('total_estimated_cost', 'N/A')}")
-            print(f"Budget Status: {analysis.get('budget_status', 'N/A')}")
-            
-            print("\nCategories and Items:")
-            for category in analysis.get('categories', []):
-                print(f"\n{category.get('name', 'Unnamed Category')}:")
-                for item in category.get('items', []):
-                    print(f"  - {item.get('name', 'Unnamed Item')} (${item.get('estimated_cost', 'N/A')})")
-                    print(f"    Priority: {item.get('priority', 'N/A')}")
-                    print(f"    Notes: {item.get('notes', 'N/A')}")
+    # Check if there's feedback in the state
+    if 'user_feedback' in state and state['user_feedback']:
+        feedback = state['user_feedback']
+        new_state['user_feedback'] = feedback
         
-        print("\nReview Results:")
-        rethink = new_state['rethink']
-        if 'error' in rethink:
-            print(f"Error in review: {rethink['error']}")
-        else:
-            print(f"Alignment Score: {rethink.get('alignment_score', 'N/A')}/100")
-            print(f"Overall Feedback: {rethink.get('overall_feedback', 'N/A')}")
-            
-            if rethink.get('recommendations'):
-                print("\nRecommendations:")
-                for rec in rethink['recommendations']:
-                    print(f"\nCategory: {rec.get('category', 'N/A')}")
-                    print(f"Item: {rec.get('item', 'N/A')}")
-                    print(f"Suggestion: {rec.get('suggestion', 'N/A')}")
-                    print(f"Expected Impact: {rec.get('impact', 'N/A')}")
+        # Update the brief with the feedback
+        new_state['brief'] = f"{new_state['brief']}\n\nUser Feedback: {feedback}"
         
-        # Get user feedback
-        print("\nDo you want to provide feedback for the analysis? (yes/no)")
-        response = input().strip().lower()
-        
-        if response == 'yes':
-            print("\nPlease provide your feedback:")
-            feedback = input().strip()
-            new_state['user_feedback'] = feedback
-            
-            # Update the brief with the feedback
-            new_state['brief'] = f"{new_state['brief']}\n\nUser Feedback: {feedback}"
-            
-            new_state['messages'] = new_state['messages'] + [
-                f"User feedback received: {feedback}",
-                "Brief updated with user feedback"
-            ]
-            new_state['next_node'] = 'analyze'  # Go back to analyze with updated brief
-        else:
-            new_state['messages'] = new_state['messages'] + ["No user feedback provided"]
-            new_state['next_node'] = 'end'  # End the workflow
-        
-        return new_state
-        
-    except Exception as e:
-        error_msg = str(e)
-        new_state['messages'] = new_state['messages'] + [f"Error getting user feedback: {error_msg}"]
-        new_state['next_node'] = 'end'
-        return new_state
+        new_state['messages'] = new_state['messages'] + [
+            f"User feedback received: {feedback}",
+            "Brief updated with user feedback"
+        ]
+        new_state['next_node'] = 'analyze'  # Go back to analyze with updated brief
+    else:
+        new_state['messages'] = new_state['messages'] + ["No user feedback provided"]
+        new_state['next_node'] = 'end'  # End the workflow
+    
+    return new_state
 
 def review_and_decide(state: AgentState) -> AgentState:
     """
