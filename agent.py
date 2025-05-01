@@ -18,13 +18,17 @@ import tempfile
 import subprocess
 import graphviz
 
-#load_dotenv("secrets.env")
+# Load environment variables from secrets.env file if it exists
+if os.path.exists('secrets.env'):
+    load_dotenv('secrets.env')
 
-# Access the variables
-api_key = os.environ.get("API_KEY")
-print(api_key)
-if "GOOGLE_API_KEY" not in os.environ:
-    os.environ["GOOGLE_API_KEY"] = api_key
+# Try to get API key from environment variables (works for both local .env and GitHub Secrets)
+api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in secrets.env or GitHub Secrets.")
+
+# Set API key in environment for Google services
+os.environ["GOOGLE_API_KEY"] = api_key
 
 #Initalizing the LLM
 from langchain_google_genai import ChatGoogleGenerativeAI
