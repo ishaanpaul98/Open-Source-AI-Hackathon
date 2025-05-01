@@ -18,10 +18,10 @@ import tempfile
 import subprocess
 import graphviz
 
-load_dotenv("secrets.env")
+#load_dotenv("secrets.env")
 
 # Access the variables
-api_key = os.getenv("API_KEY")
+api_key = os.environ.get("API_KEY")
 
 if "GOOGLE_API_KEY" not in os.environ:
     os.environ["GOOGLE_API_KEY"] = api_key
