@@ -18,14 +18,19 @@ import tempfile
 import subprocess
 import graphviz
 
-# Load environment variables from secrets.env file if it exists
+# Try to load from secrets.env first (for local development)
 if os.path.exists('secrets.env'):
     load_dotenv('secrets.env')
 
-# Try to get API key from environment variables (works for both local .env and GitHub Secrets)
+# Get API key from environment variables
 api_key = os.getenv("GOOGLE_API_KEY")
 if not api_key:
-    raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in secrets.env or GitHub Secrets.")
+    # For Streamlit Cloud, try to get from st.secrets
+    try:
+        import streamlit as st
+        api_key = st.secrets["GOOGLE_API_KEY"]
+    except:
+        raise ValueError("GOOGLE_API_KEY not found. Please set it in Streamlit Cloud secrets or local secrets.env file.")
 
 # Set API key in environment for Google services
 os.environ["GOOGLE_API_KEY"] = api_key
