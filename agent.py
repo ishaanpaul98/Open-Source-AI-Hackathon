@@ -22,7 +22,7 @@ import graphviz
 
 # Access the variables
 api_key = os.environ.get("API_KEY")
-
+print(api_key)
 if "GOOGLE_API_KEY" not in os.environ:
     os.environ["GOOGLE_API_KEY"] = api_key
 
